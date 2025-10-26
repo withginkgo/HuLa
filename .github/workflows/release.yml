@@ -57,14 +57,17 @@ jobs:
       fail-fast: false  # 某个平台构建失败不影响其他平台
       matrix:
         include:
-          - platform: "macos-latest" # for Arm based macs (M1 and above).
-            args: "--target aarch64-apple-darwin"
-          - platform: "macos-latest" # for Intel based macs.
-            args: "--target x86_64-apple-darwin"
+          # 1. Linux x64 (tar.gz 将根据 tauri.conf.json 配置生成)
           - platform: "ubuntu-22.04"
             args: ""
-          - platform: "windows-latest"
-            args: ""
+            build_type: "desktop"
+            rust_targets: "" # 默认为 x86_64-unknown-linux-gnu
+
+          # 2. Android arm64-v8a (apk)
+          - platform: "ubuntu-latest"
+            args: "--target aarch64-linux-android"
+            build_type: "android"
+            rust_targets: "aarch64-linux-android"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -76,8 +79,9 @@ jobs:
           name: components-typings
           path: .
 
-      - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+      # 仅为 Linux 桌面版安装依赖
+      - name: install dependencies (ubuntu desktop only)
+        if: matrix.build_type == 'desktop'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -89,6 +93,14 @@ jobs:
             pkg-config \
             libgtk-3-dev \
             libayatana-appindicator3-dev
+
+      # 仅为 Android 版设置 Java
+      - name: Setup Java JDK (for Android)
+        if: matrix.build_type == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17' # Tauri 推荐 JDK 17
 
       # 添加环境变量配置
       - name: Set up environment variables
@@ -113,10 +125,10 @@ jobs:
 
       # 安装 Rust
       - name: install Rust stable
-        uses: dtolnay/rust-toolchain@stable # Set this to dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
-          # Those targets are only used on macos runners so it's in an `if` to slightly speed up windows and linux builds.
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          # 根据 matrix 安装所需的 targets
+          targets: ${{ matrix.rust_targets }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -132,7 +144,7 @@ jobs:
           # 使用之前配置的私钥密码
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: v__VERSION__ #这个动作会自动将\_\_VERSION\_\_替换为app version
+          tagName: v__VERSION__ #这个动作会自动将__VERSION__替换为app version
           releaseName: 'v__VERSION__'
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
